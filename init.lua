@@ -1,7 +1,6 @@
--- init.lua (minimal NVim setup)
--- Language support, git, file explorer, helix-like keymaps
+-- init.lua (minimal NVim setup with Ashen theme)
 
--- Use lazy.nvim plugin manager
+-- Plugin manager
 local lazypath = vim.fn.stdpath("data") .. "/lazy/lazy.nvim"
 if not vim.loop.fs_stat(lazypath) then
   vim.fn.system({
@@ -20,43 +19,77 @@ require("lazy").setup({
   -- Treesitter
   { "nvim-treesitter/nvim-treesitter", build = ":TSUpdate" },
 
-  -- Git
+  -- Git signs
   { "lewis6991/gitsigns.nvim", config = true },
 
   -- File explorer
-  { "nvim-tree/nvim-tree.lua", dependencies = { "nvim-tree/nvim-web-devicons" }, config = true },
+  { "nvim-tree/nvim-tree.lua", dependencies = { "nvim-tree/nvim-web-devicons" } },
+
+  -- Floating terminal
+  { "akinsho/toggleterm.nvim", version = "*", config = function()
+      require("toggleterm").setup{
+          size = 20,
+          open_mapping = [[<leader>t]],
+          direction = 'float',
+      }
+    end
+  },
+
+  -- Ashen theme (Catppuccin)
+  { "catppuccin/nvim", name = "catppuccin", priority = 1000, config = function()
+      require("catppuccin").setup({
+        flavour = "mocha",           -- Ashen-like dark flavor
+        transparent_background = false,
+        integrations = {
+          nvimtree = true,
+          gitsigns = true,
+          treesitter = true,
+        },
+      })
+      vim.cmd.colorscheme "catppuccin"
+  end },
 })
 
--- LSP basic setup
-local lsp = vim.lsp.config
+-- LSP
+local lspconfig = require("lspconfig")
+lspconfig.lua_ls.setup({})
+lspconfig.ts_ls.setup({})
+lspconfig.pyright.setup({})
 
-lsp.lua_ls = {}
-lsp.ts_ls = {}
-lsp.pyright = {}
-
--- Apply
-vim.lsp.start(lsp.lua_ls)
-vim.lsp.start(lsp.ts_ls)
-vim.lsp.start(lsp.pyright)
-
--- Treesitter setup
+-- Treesitter
 require("nvim-treesitter.configs").setup({
   highlight = { enable = true },
   indent = { enable = true },
 })
 
+-- nvim-tree with Helix-like h/l bindings
+require("nvim-tree").setup({
+  on_attach = function(bufnr)
+    local api = require('nvim-tree.api')
+    local function opts(desc)
+      return { desc = 'nvim-tree: '..desc, buffer = bufnr, noremap=true, silent=true, nowait=true }
+    end
+
+    vim.keymap.set('n', 'h', api.node.navigate.parent_close, opts('Close Directory'))
+    vim.keymap.set('n', 'l', api.node.open.edit, opts('Open'))
+    vim.keymap.set('n', 'v', api.node.open.vertical, opts('Open: Vertical Split'))
+    vim.keymap.set('n', 's', api.node.open.horizontal, opts('Open: Horizontal Split'))
+    vim.keymap.set('n', 'o', api.node.open.edit, opts('Open'))
+  end
+})
+
 -- Helix-like keymaps
 local map = vim.keymap.set
 vim.g.mapleader = " "
-
 map("n", "gh", "0")
 map("n", "gl", "$")
 map("n", "gs", "gg")
 map("n", "ge", "G")
-map("n", "<leader>e", ":NvimTreeToggle<CR>")
+map("n", "<leader>f", ":NvimTreeToggle<CR>")
 map("n", "<leader>g", ":Gitsigns toggle_signs<CR>")
+map("n", "<leader>vt", ":vsplit | terminal<CR>")
 
--- Basic options
+-- Options
 vim.opt.number = true
 vim.opt.relativenumber = true
 vim.opt.termguicolors = true
