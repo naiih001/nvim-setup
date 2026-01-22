@@ -23,8 +23,9 @@ require("lazy").setup({
   {
     "nvim-treesitter/nvim-treesitter",
     build = ":TSUpdate",
+    lazy = false, 
     config = function()
-      require("nvim-treesitter.configs").setup({
+      require("nvim-treesitter.config").setup({
         highlight = { enable = true },
         indent    = { enable = true },
         ensure_installed = { "lua", "vim", "python", "javascript", "typescript", "go", "cpp", "c", "solidity", "toml", "yaml" },
@@ -132,6 +133,39 @@ require("lazy").setup({
       })
     end,
   },
+  {
+  "windwp/nvim-autopairs",
+  event = "InsertEnter",  -- Load only when entering insert mode
+  dependencies = { "hrsh7th/nvim-cmp" },  -- Optional but recommended for cmp integration
+  config = function()
+    local autopairs = require("nvim-autopairs")
+
+    autopairs.setup({
+      check_ts = true,                -- Use Treesitter to detect context (smarter pairing)
+      ts_config = {
+        lua = { "string", "source" }, -- Don't add pairs inside these Treesitter nodes
+        javascript = { "string", "template_string" },
+      },
+      disable_filetype = { "TelescopePrompt", "spectre_panel" },
+      fast_wrap = {
+        map = "<M-e>",                -- Alt+e to fast-wrap selected text (optional)
+        chars = { "{", "[", "(", '"', "'" },
+        pattern = string.gsub([[ [%'%"%)%>%]%)%}%,] ]], "%s+", ""),
+        offset = 0,
+        end_key = "$",
+        keys = "qwertyuiopzxcvbnmasdfghjkl",
+        check_comma = true,
+        highlight = "PmenuSel",
+        highlight_grey = "LineNr",
+      },
+    })
+
+    -- Integrate with nvim-cmp (so it doesn't interfere with completion)
+    local cmp_autopairs = require("nvim-autopairs.completion.cmp")
+    local cmp = require("cmp")
+    cmp.event:on("confirm_done", cmp_autopairs.on_confirm_done())
+  end,
+}
 })
 
 -- Mason setup
@@ -141,22 +175,11 @@ require("mason-lspconfig").setup({
   automatic_installation = true,
 })
 
--- LSP setup
-local lspconfig = require("lspconfig")
+-- LSP capabilities (for cmp-nvim-lsp integration)
+local capabilities = vim.lsp.protocol.make_client_capabilities()
+capabilities = require("cmp_nvim_lsp").default_capabilities(capabilities)
 
--- Default handler
-local on_attach = function(_, bufnr)
-  local map = vim.keymap.set
-  map("n", "gh", "0",  { desc = "Line start", buffer = bufnr })
-  map("n", "gl", "$",  { desc = "Line end", buffer = bufnr })
-  map("n", "gs", "gg", { desc = "File top", buffer = bufnr })
-  map("n", "ge", "G",  { desc = "File bottom", buffer = bufnr })
-end
-
-local capabilities = require("cmp_nvim_lsp").default_capabilities(
-  vim.lsp.protocol.make_client_capabilities()
-)
-
+-- Your servers + custom settings (same as before)
 local servers = {
   lua_ls = {
     settings = {
@@ -176,11 +199,36 @@ local servers = {
   yamlls = {},
 }
 
+-- Apply configs (nvim-lspconfig defaults are auto-merged!)
 for server, config in pairs(servers) do
-  config.capabilities = capabilities
-  config.on_attach = on_attach
-  lspconfig[server].setup(config)
+  config.capabilities = vim.tbl_deep_extend("force", capabilities, config.capabilities or {})
+  vim.lsp.config(server, config)
 end
+
+-- Enable all servers (auto-attach on matching filetypes)
+vim.lsp.enable(vim.tbl_keys(servers))
+
+-- LSP keymaps on attach (better than old on_attach)
+vim.api.nvim_create_autocmd("LspAttach", {
+  group = vim.api.nvim_create_augroup("UserLspConfig", { clear = true }),
+  callback = function(ev)
+    local opts = { buffer = ev.buf, noremap = true, silent = true }
+    local map = vim.keymap.set
+
+    -- Your basic navigation (you already have these globally, but ok)
+    map("n", "gh", "^", opts)
+    map("n", "gl", "$", opts)
+
+    -- Useful LSP actions
+    map("n", "gd", vim.lsp.buf.definition, { desc = "Go to definition", buffer = ev.buf })
+    map("n", "gD", vim.lsp.buf.declaration, { desc = "Go to declaration", buffer = ev.buf })
+    map("n", "gi", vim.lsp.buf.implementation, { desc = "Go to implementation", buffer = ev.buf })
+    map("n", "gr", vim.lsp.buf.references, { desc = "Find references", buffer = ev.buf })
+    map("n", "K", vim.lsp.buf.hover, { desc = "Hover documentation", buffer = ev.buf })
+    map({ "n", "v" }, "<leader>ca", vim.lsp.buf.code_action, { desc = "Code action", buffer = ev.buf })
+    map("n", "<leader>rn", vim.lsp.buf.rename, { desc = "Rename symbol", buffer = ev.buf })
+  end,
+})
 
 -- Diagnostics
 vim.diagnostic.config({
@@ -209,59 +257,23 @@ require("nvim-tree").setup({
     vim.keymap.set("n", "s", api.node.open.horizontal,        opts("Open: Horizontal Split"))
     vim.keymap.set("n", "o", api.node.open.edit,              opts("Open"))
 
-    -- Toggle + focus tree with <leader>f
     vim.keymap.set("n", "<leader>f", function()
-      local view = require("nvim-tree.view")
-      local lib  = require("nvim-tree.lib")
-      if view.is_visible() then
-        view.close()
+      local api = require("nvim-tree.api")
+      if require("nvim-tree.view").is_visible() then 
+	if vim.bo.filetype == "NvimTree" then
+		api.tree.close()
+	else
+		api.tree.focuse()
+	end
       else
-        require("nvim-tree").toggle()
-        lib.focus()
+	api.tree.toggle({ focuse = true })
       end
-    end, opts("Toggle & Focus nvim-tree"))
+    end, opts("Toggle, Focus, or Close nvim-tree"))
 
     -- Make nvim-tree buffer modifiable
     vim.api.nvim_buf_set_option(bufnr, "modifiable", true)
   end,
 })
-
-on_attach = function(bufnr)
-  local api = require("nvim-tree.api")
-  local function opts(desc)
-    return { desc = "nvim-tree: "..desc, buffer = bufnr, noremap=true, silent=true, nowait=true }
-  end
-
-  -- Helix-style navigation
-  vim.keymap.set("n", "h", api.node.navigate.parent_close, opts("Close Directory")) -- go up
-  vim.keymap.set("n", "l", api.node.open.edit,              opts("Open File"))       -- open file
-  vim.keymap.set("n", "v", api.node.open.vertical,          opts("Open: Vertical Split"))
-  vim.keymap.set("n", "s", api.node.open.horizontal,        opts("Open: Horizontal Split"))
-  vim.keymap.set("n", "o", api.node.open.edit,              opts("Open"))            -- same as l
-
-  -- Create/Delete/Rename
-  vim.keymap.set("n", "a", api.fs.create,                   opts("Create File/Folder"))
-  vim.keymap.set("n", "d", api.fs.remove,                   opts("Delete"))
-  vim.keymap.set("n", "r", api.fs.rename,                   opts("Rename"))
-  vim.keymap.set("n", "y", api.fs.copy.node,                opts("Copy"))
-  vim.keymap.set("n", "x", api.fs.cut,                      opts("Cut"))
-  vim.keymap.set("n", "p", api.fs.paste,                    opts("Paste"))
-
-  -- Toggle / Focus
-  vim.keymap.set("n", "<leader>f", function()
-    local view = require("nvim-tree.view")
-    local lib  = require("nvim-tree.lib")
-    if view.is_visible() then
-      view.close()
-    else
-      require("nvim-tree").toggle()
-      lib.focus()
-    end
-  end, opts("Toggle & Focus nvim-tree"))
-
-  -- Make buffer modifiable
-  vim.api.nvim_buf_set_option(bufnr, "modifiable", true)
-end
 
 local map  = vim.keymap.set
 local opts = { noremap = true, silent = true } 
@@ -271,6 +283,27 @@ map('n', 'gg', 'gg', opts) -- top of file
 map('n', 'ge', 'G', opts)  -- end of file
 map('n', 'gh', '^', opts)  -- beginning of line
 map('n', 'gl', '$', opts)  -- end of line
+
+local function nvim_tree_toggle_focus()
+  local api = require("nvim-tree.api")
+  local view = require("nvim-tree.view")
+
+  if view.is_visible() then
+    -- if the nvim-tree buffer is the current buffer, close it
+    if vim.bo.filetype == "NvimTree" or vim.bo.filetype == "nvimtree" then
+      api.tree.close()
+    else
+      -- tree is visible but we are in another buffer: focus the tree
+      api.tree.focus()
+    end
+  else
+    -- tree not visible: open and focus it
+    api.tree.toggle({ focus = true })
+  end
+end
+
+map("n", "<leader>f", nvim_tree_toggle_focus, { desc = "Toggle/Focus/Close nvim-tree", noremap = true, silent = true })
+
 
 -- General options
 vim.opt.number         = true
